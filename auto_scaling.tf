@@ -14,7 +14,7 @@ resource "aws_launch_template" "dev-launch-template" {
   image_id = data.aws_ami.amzLinux.id
   instance_type = "t2.micro"
   vpc_security_group_ids = [aws_security_group.sg_vpc.id]
-
+  user_data = file("userdatalaunchtemplate.sh")
  }
 
 #Autoscaling Group
