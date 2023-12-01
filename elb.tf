@@ -22,10 +22,6 @@ resource "aws_lb_target_group" "target-group" {
   }
 }
 
-data "aws_subnet_ids" "subnet" {
-    vpc_id = aws_vpc.dev_vpc.id
-}
-
 # creating ALB
 resource "aws_lb" "application-lb" {
   name               = "nit-alb"
