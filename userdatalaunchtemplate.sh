@@ -11,7 +11,8 @@ sudo yum install -y mariadb105-server php php-mysqlnd unzip
 DBName='aurora_db'
 DBUser='admin'
 DBPassword='wWkTAeM3n3ZQUlOBQzh0'
-DBRootPassword='DBRootPassword'
+DBRootPassword='wWkTAeM3n3ZQUlOBQzh0'
+DBHost='clusterinstance-0.cyoauc7cwdyr.us-east-1.rds.amazonaws.com'
 
 # Start Apache server and enable it on system startup
 
@@ -43,6 +44,7 @@ cp ./wp-config-sample.php ./wp-config.php # rename the file from sample to clean
 sed -i "s/'database_name_here'/'$DBName'/g" wp-config.php 
 sed -i "s/'username_here'/'$DBUser'/g" wp-config.php 
 sed -i "s/'password_here'/'$DBPassword'/g" wp-config.php
+sed -i "s/'localhost'/'$DBHost'/g" wp-config.php
 # Grant permissions
 
 usermod -a -G apache ec2-user 
