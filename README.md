@@ -13,3 +13,6 @@ Git: Git is a distributed version control system that is used to track changes t
 GitHub: GitHub is a hosting service for Git repositories.
 
 Scrum methodology: Scrum is an agile project management framework that is used to manage software development projects. It is based on the idea of breaking down the project into smaller, more manageable tasks that are completed in short iterations.
+
+
+![image](https://github.com/drdominicsingaraj/deham9_capstone/assets/150048253/f1a2de21-e3ff-420e-a4f2-8af36672b621)
