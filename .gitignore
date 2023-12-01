@@ -3,3 +3,5 @@
 terraform.tfstate
 terraform.tfstate.backup
 metadata
+plan.json
+plan.out
