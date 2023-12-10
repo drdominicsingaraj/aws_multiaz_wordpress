@@ -5,3 +5,7 @@ terraform.tfstate.backup
 metadata
 plan.json
 plan.out
+.vscode/settings.json
+app.log
+app1.log
+.terraform/providers/registry.terraform.io/hashicorp/template/2.2.0/windows_amd64/terraform-provider-template_v2.2.0_x4.exe

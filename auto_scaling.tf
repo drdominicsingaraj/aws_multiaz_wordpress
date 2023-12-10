@@ -8,13 +8,22 @@ data "aws_ami" "amzLinux" {
         }
 }
 
+data "template_file" "userdatatemplate" {
+  template = "${file("userdatalaunchtemplate.tpl")}"
+}
+
+output "rendered" {
+  value = "${data.template_file.userdatatemplate.rendered}"
+}
+
 #Launch Template
 resource "aws_launch_template" "dev-launch-template" {
   name = "WebserverLaunchTemplate"
   image_id = data.aws_ami.amzLinux.id
   instance_type = "t2.micro"
   vpc_security_group_ids = [aws_security_group.sg_vpc.id]
-  user_data = file("userdatalaunchtemplate.sh")
+  #user_data = file("userdatalaunchtemplate.sh")
+  user_data = "${base64encode(data.template_file.userdatatemplate.rendered)}"
  }
 
 #Autoscaling Group

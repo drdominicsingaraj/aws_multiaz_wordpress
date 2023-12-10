@@ -12,7 +12,7 @@ DBName='aurora_db'
 DBUser='admin'
 DBPassword='wWkTAeM3n3ZQUlOBQzh0'
 DBRootPassword='wWkTAeM3n3ZQUlOBQzh0'
-DBHost='clusterinstance-0.cyoauc7cwdyr.us-east-1.rds.amazonaws.com'
+#DBHost='clusterinstance-0.cyoauc7cwdyr.us-east-1.rds.amazonaws.com'
 
 # Start Apache server and enable it on system startup
 
