@@ -20,9 +20,10 @@ resource "aws_instance" "instance" {
   key_name                    = "deham9-iam"
   vpc_security_group_ids      = [aws_security_group.sg_vpc.id]
   subnet_id                   = aws_subnet.public-1.id
+  iam_instance_profile        = "deham9_ec2"
   count = 1
   tags = {
-    Name = "instance"
+    Name = "awsrestartproject"
   }
   #user_data = file("userdata.sh")
   user_data = "${base64encode(data.template_file.ec2userdatatemplate.rendered)}"
