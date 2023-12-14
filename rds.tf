@@ -13,7 +13,7 @@ resource "aws_db_subnet_group" "db_subnet" {
 
 resource "aws_rds_cluster" "auroracluster" {
   cluster_identifier        = "auroracluster"
-  availability_zones        = ["us-east-1a", "us-east-1b"]
+  # availability_zones        = ["us-east-1a", "us-east-1b"]
 
   engine                    = "aurora-mysql"
   engine_version            = "5.7.mysql_aurora.2.11.1"
