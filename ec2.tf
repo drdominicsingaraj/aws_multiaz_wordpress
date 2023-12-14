@@ -20,7 +20,7 @@ resource "aws_instance" "instance" {
   key_name                    = "deham9-iam"
   vpc_security_group_ids      = [aws_security_group.sg_vpc.id]
   subnet_id                   = aws_subnet.public-1.id
-  count = 2
+  count = 1
   tags = {
     Name = "instance"
   }
