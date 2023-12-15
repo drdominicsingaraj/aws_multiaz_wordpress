@@ -91,7 +91,7 @@ resource "aws_route_table" "RB_Private_RouteTable" {
 
   route { 
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_nat_gateway.nat.id
+    gateway_id = aws_internet_gateway.igw.id
   }
   tags = {
     Name = "deham9"
