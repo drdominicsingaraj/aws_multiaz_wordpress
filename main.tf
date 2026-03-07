@@ -61,7 +61,7 @@ resource "aws_internet_gateway" "igw" {
 
 # Allocate Elastic IP for NAT Gateway
 resource "aws_eip" "nat_eip" {
-  vpc = true
+  domain = "vpc"
 }
 
 # Create a NAT Gateway for the private subnet(s) to access the internet
@@ -91,7 +91,7 @@ resource "aws_route_table" "RB_Private_RouteTable" {
 
   route { 
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw.id
+    gateway_id = aws_nat_gateway.nat.id
   }
   tags = {
     Name = "deham9"
