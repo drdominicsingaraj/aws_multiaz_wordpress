@@ -74,14 +74,6 @@ resource "aws_security_group" "allow_ec2_aurora" {
   description = "Allow EC2 to Aurora traffic"
   vpc_id      = aws_vpc.dev_vpc.id
 
-  ingress {
-    description      = "allow ec2 to aurora"
-    from_port        = 22
-    to_port          = 22
-    protocol         = "tcp"
-    cidr_blocks      = ["0.0.0.0/0"]
-  }
-
   egress {
     from_port        = 3306
     to_port          = 3306
