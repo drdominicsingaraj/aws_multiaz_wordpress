@@ -793,7 +793,7 @@ Follow the on-screen instructions:
 4. Enter admin email
 5. Click "Install WordPress"
 
-### Step 12: Test High Availability
+### Step 12: Test High Availability and Auto Scaling
 
 **1. Test Load Balancer Distribution**
 
@@ -805,22 +805,402 @@ for i in {1..10}; do
 done
 ```
 
-**2. Test Auto Scaling**
+**2. Test Auto Scaling with Stress Testing**
+
+#### Option A: Using Apache Bench (ab) - Simple Load Testing
+
+**Install Apache Bench:**
+```bash
+# On Amazon Linux / RHEL / CentOS
+sudo yum install httpd-tools -y
+
+# On Ubuntu / Debian
+sudo apt-get install apache2-utils -y
+
+# On macOS
+brew install httpd
+```
+
+**Run Basic Load Test:**
+```bash
+# Get ALB DNS
+ALB_DNS=$(aws elbv2 describe-load-balancers \
+  --names nit-alb \
+  --query 'LoadBalancers[0].DNSName' \
+  --output text)
+
+# Test with 1000 requests, 50 concurrent connections
+ab -n 1000 -c 50 http://$ALB_DNS/
+
+# More aggressive test: 10,000 requests, 100 concurrent
+ab -n 10000 -c 100 http://$ALB_DNS/
+
+# Sustained load test (5 minutes)
+ab -t 300 -c 50 http://$ALB_DNS/
+```
+
+**Expected Output:**
+```
+Concurrency Level:      50
+Time taken for tests:   45.123 seconds
+Complete requests:      1000
+Failed requests:        0
+Requests per second:    22.16 [#/sec] (mean)
+Time per request:       2256.150 [ms] (mean)
+```
+
+#### Option B: Using Apache JMeter - Advanced Load Testing
+
+**Install JMeter:**
+```bash
+# Download JMeter
+wget https://dlcdn.apache.org//jmeter/binaries/apache-jmeter-5.6.3.tgz
+tar -xzf apache-jmeter-5.6.3.tgz
+cd apache-jmeter-5.6.3/bin
+
+# Run JMeter GUI
+./jmeter
+```
+
+**Create JMeter Test Plan:**
+1. Add Thread Group: Right-click Test Plan → Add → Threads → Thread Group
+   - Number of Threads: 100
+   - Ramp-up Period: 60 seconds
+   - Loop Count: 10
+
+2. Add HTTP Request: Right-click Thread Group → Add → Sampler → HTTP Request
+   - Server Name: `<alb-dns-name>`
+   - Port: 80
+   - Path: /
+
+3. Add Listeners:
+   - View Results Tree
+   - Summary Report
+   - Graph Results
+
+4. Run Test: Click green "Start" button
+
+**Run JMeter in CLI Mode (Recommended for load testing):**
+```bash
+./jmeter -n -t test-plan.jmx -l results.jtl -e -o report/
+
+# Parameters:
+# -n: Non-GUI mode
+# -t: Test plan file
+# -l: Results file
+# -e: Generate report
+# -o: Output folder
+```
+
+#### Option C: Using stress-ng - CPU Stress Testing
+
+**SSH to EC2 Instance and Generate CPU Load:**
+```bash
+# SSH to one of the ASG instances
+ssh -i deham9-iam.pem ec2-user@<instance-ip>
+
+# Install stress-ng
+sudo yum install stress-ng -y
+
+# Generate CPU load (all cores, 5 minutes)
+stress-ng --cpu 0 --timeout 300s --metrics-brief
+
+# Generate specific CPU load (80% for 10 minutes)
+stress-ng --cpu 2 --cpu-load 80 --timeout 600s
+```
+
+#### Option D: Using Locust - Python-based Load Testing
+
+**Install Locust:**
+```bash
+# Install Python and pip (if not already installed)
+sudo yum install python3 python3-pip -y
+
+# Install Locust
+pip3 install locust
+```
+
+**Create Locust Test File (locustfile.py):**
+```python
+from locust import HttpUser, task, between
+
+class WordPressUser(HttpUser):
+    wait_time = between(1, 3)  # Wait 1-3 seconds between requests
+    
+    @task(3)
+    def view_homepage(self):
+        self.client.get("/")
+    
+    @task(1)
+    def view_post(self):
+        self.client.get("/sample-post/")
+    
+    @task(1)
+    def view_about(self):
+        self.client.get("/about/")
+
+# Run with:
+# locust -f locustfile.py --host=http://<alb-dns> --users 100 --spawn-rate 10
+```
+
+**Run Locust Test:**
+```bash
+# Get ALB DNS
+ALB_DNS=$(aws elbv2 describe-load-balancers \
+  --names nit-alb \
+  --query 'LoadBalancers[0].DNSName' \
+  --output text)
+
+# Run headless (no web UI)
+locust -f locustfile.py \
+  --host=http://$ALB_DNS \
+  --users 100 \
+  --spawn-rate 10 \
+  --run-time 10m \
+  --headless
+
+# Or run with web UI (access at http://localhost:8089)
+locust -f locustfile.py --host=http://$ALB_DNS
+```
+
+#### Option E: Using AWS CloudWatch Synthetics - Continuous Testing
+
+**Create Canary Script:**
+```bash
+# Create canary via AWS Console
+# Navigate to: CloudWatch → Application Monitoring → Synthetics Canaries
+# Or use AWS CLI:
+
+aws synthetics create-canary \
+  --name wordpress-load-test \
+  --artifact-s3-location s3://deham9alblogs/canary/ \
+  --execution-role-arn arn:aws:iam::<account-id>:role/CloudWatchSyntheticsRole \
+  --schedule Expression="rate(5 minutes)" \
+  --runtime-version syn-nodejs-puppeteer-3.9 \
+  --code Handler="index.handler",S3Bucket="<bucket>",S3Key="canary.zip"
+```
+
+### Monitoring Auto Scaling During Load Tests
+
+**1. Monitor Auto Scaling Activity in Real-Time**
 
 ```bash
-# Get ASG name
-ASG_NAME="awsrestart-autoscaling-group"
+# Watch Auto Scaling activities
+watch -n 5 'aws autoscaling describe-scaling-activities \
+  --auto-scaling-group-name awsrestart-autoscaling-group \
+  --max-records 5 \
+  --query "Activities[*].[StartTime,Description,StatusCode]" \
+  --output table'
+```
 
-# Check current capacity
+**2. Monitor CloudWatch Metrics**
+
+```bash
+# Get CPU utilization for ASG
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/EC2 \
+  --metric-name CPUUtilization \
+  --dimensions Name=AutoScalingGroupName,Value=awsrestart-autoscaling-group \
+  --start-time $(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 60 \
+  --statistics Average \
+  --query 'Datapoints[*].[Timestamp,Average]' \
+  --output table
+
+# Monitor ALB request count
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/ApplicationELB \
+  --metric-name RequestCount \
+  --dimensions Name=LoadBalancer,Value=app/nit-alb/<id> \
+  --start-time $(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 60 \
+  --statistics Sum \
+  --output table
+```
+
+**3. Create CloudWatch Dashboard for Live Monitoring**
+
+```bash
+# Create dashboard JSON
+cat > dashboard.json <<'EOF'
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "properties": {
+        "metrics": [
+          ["AWS/EC2", "CPUUtilization", {"stat": "Average"}]
+        ],
+        "period": 60,
+        "stat": "Average",
+        "region": "us-east-1",
+        "title": "ASG CPU Utilization"
+      }
+    },
+    {
+      "type": "metric",
+      "properties": {
+        "metrics": [
+          ["AWS/ApplicationELB", "RequestCount", {"stat": "Sum"}]
+        ],
+        "period": 60,
+        "stat": "Sum",
+        "region": "us-east-1",
+        "title": "ALB Request Count"
+      }
+    }
+  ]
+}
+EOF
+
+# Create dashboard
+aws cloudwatch put-dashboard \
+  --dashboard-name WordPress-LoadTest \
+  --dashboard-body file://dashboard.json
+```
+
+**4. Monitor Target Health**
+
+```bash
+# Get target group ARN
+TG_ARN=$(aws elbv2 describe-target-groups \
+  --names nit-tg \
+  --query 'TargetGroups[0].TargetGroupArn' \
+  --output text)
+
+# Watch target health
+watch -n 5 "aws elbv2 describe-target-health \
+  --target-group-arn $TG_ARN \
+  --query 'TargetHealthDescriptions[*].[Target.Id,TargetHealth.State,TargetHealth.Reason]' \
+  --output table"
+```
+
+### Complete Load Testing Workflow
+
+**Step-by-Step Load Test Procedure:**
+
+```bash
+#!/bin/bash
+# load-test.sh - Complete load testing script
+
+# 1. Get initial state
+echo "=== Initial State ==="
+ASG_NAME="awsrestart-autoscaling-group"
+ALB_DNS=$(aws elbv2 describe-load-balancers \
+  --names nit-alb \
+  --query 'LoadBalancers[0].DNSName' \
+  --output text)
+
+echo "ALB DNS: $ALB_DNS"
+echo "Current ASG capacity:"
 aws autoscaling describe-auto-scaling-groups \
   --auto-scaling-group-names $ASG_NAME \
-  --query 'AutoScalingGroups[0].[MinSize,DesiredCapacity,MaxSize]'
+  --query 'AutoScalingGroups[0].[MinSize,DesiredCapacity,MaxSize,Instances[*].InstanceId]' \
+  --output table
 
-# Manually trigger scaling (optional)
-aws autoscaling set-desired-capacity \
+# 2. Start monitoring in background
+echo -e "\n=== Starting Monitoring ==="
+(
+  while true; do
+    CAPACITY=$(aws autoscaling describe-auto-scaling-groups \
+      --auto-scaling-group-names $ASG_NAME \
+      --query 'AutoScalingGroups[0].DesiredCapacity' \
+      --output text)
+    CPU=$(aws cloudwatch get-metric-statistics \
+      --namespace AWS/EC2 \
+      --metric-name CPUUtilization \
+      --dimensions Name=AutoScalingGroupName,Value=$ASG_NAME \
+      --start-time $(date -u -d '2 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+      --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+      --period 60 \
+      --statistics Average \
+      --query 'Datapoints[0].Average' \
+      --output text)
+    echo "$(date +%H:%M:%S) - Capacity: $CAPACITY, CPU: ${CPU}%"
+    sleep 30
+  done
+) &
+MONITOR_PID=$!
+
+# 3. Run load test
+echo -e "\n=== Starting Load Test ==="
+echo "Running Apache Bench test for 5 minutes..."
+ab -t 300 -c 100 -g results.tsv http://$ALB_DNS/ > ab-results.txt 2>&1
+
+# 4. Wait for scaling to complete
+echo -e "\n=== Waiting for Auto Scaling ==="
+sleep 120
+
+# 5. Check final state
+echo -e "\n=== Final State ==="
+aws autoscaling describe-auto-scaling-groups \
+  --auto-scaling-group-names $ASG_NAME \
+  --query 'AutoScalingGroups[0].[MinSize,DesiredCapacity,MaxSize,Instances[*].InstanceId]' \
+  --output table
+
+# 6. Show scaling activities
+echo -e "\n=== Scaling Activities ==="
+aws autoscaling describe-scaling-activities \
   --auto-scaling-group-name $ASG_NAME \
-  --desired-capacity 2
+  --max-records 5 \
+  --query 'Activities[*].[StartTime,Description,StatusCode]' \
+  --output table
+
+# 7. Stop monitoring
+kill $MONITOR_PID
+
+echo -e "\n=== Load Test Complete ==="
+echo "Results saved to: ab-results.txt"
 ```
+
+**Run the script:**
+```bash
+chmod +x load-test.sh
+./load-test.sh
+```
+
+### Expected Auto Scaling Behavior
+
+**Timeline of Events:**
+
+```
+T+0:00  - Load test starts (100 concurrent users)
+T+0:30  - CPU utilization begins to rise
+T+1:00  - CPU reaches 70% threshold
+T+1:30  - CloudWatch alarm triggers
+T+2:00  - Auto Scaling initiates scale-out
+T+2:30  - New instance launches
+T+3:00  - New instance passes health checks
+T+3:30  - New instance added to target group
+T+4:00  - Load distributed across instances
+T+5:00  - Load test ends
+T+7:00  - CPU drops below 70%
+T+12:00 - Scale-in cooldown period ends
+T+15:00 - Auto Scaling may scale in (if CPU remains low)
+```
+
+### Interpreting Load Test Results
+
+**Apache Bench Metrics:**
+```
+Key Metrics to Monitor:
+├─ Requests per second: Should increase with scaling
+├─ Time per request: Should decrease with scaling
+├─ Failed requests: Should remain at 0
+├─ 50th percentile: Median response time
+├─ 95th percentile: Response time for 95% of requests
+└─ 99th percentile: Worst-case response time
+```
+
+**Success Criteria:**
+- ✅ CPU utilization triggers scaling at ~70%
+- ✅ New instances launch within 2-3 minutes
+- ✅ No failed requests during scaling
+- ✅ Response times remain acceptable (<2 seconds)
+- ✅ All instances pass health checks
+- ✅ Load is distributed evenly across instances
 
 **3. Test Database Failover**
 
@@ -832,7 +1212,184 @@ mysql -h <aurora-endpoint> -u admin -p
 SHOW STATUS LIKE 'wsrep_cluster_status';
 ```
 
-### Step 13: Configure Monitoring (Optional)
+### Step 13: Stress Testing and Auto Scaling Validation
+
+This section provides comprehensive stress testing procedures to validate that your Auto Scaling Group responds correctly to increased load.
+
+#### Quick Start: Using load-test.sh
+
+The project includes `load-test.sh` - an automated bash script with monitoring.
+
+**Run the load test:**
+```bash
+# Make the script executable
+chmod +x load-test.sh
+
+# Run the load test
+./load-test.sh
+```
+
+**What it does:**
+1. Retrieves initial ASG state
+2. Starts background monitoring (capacity, CPU every 30 seconds)
+3. Runs Apache Bench load test (100 concurrent users, 5 minutes)
+4. Waits for Auto Scaling to stabilize
+5. Shows final state and scaling activities
+6. Generates detailed reports
+
+**Output files:**
+- `ab-results-TIMESTAMP.txt` - Detailed results
+- `ab-results-TIMESTAMP.tsv` - Gnuplot data
+- `monitor-TIMESTAMP.log` - CSV metrics log
+
+#### Using Locust for Advanced Testing
+
+The project includes `locustfile.py` for realistic user simulation.
+
+**Install Locust:**
+```bash
+pip3 install locust
+```
+
+**Run Locust tests:**
+```bash
+# Get ALB DNS
+ALB_DNS=$(aws elbv2 describe-load-balancers \
+  --names nit-alb \
+  --query 'LoadBalancers[0].DNSName' \
+  --output text)
+
+# Run with Web UI
+locust -f locustfile.py --host=http://$ALB_DNS
+# Open http://localhost:8089
+
+# Run headless (100 users, 10 minutes)
+locust -f locustfile.py \
+  --host=http://$ALB_DNS \
+  --users 100 \
+  --spawn-rate 10 \
+  --run-time 10m \
+  --headless
+
+# Generate HTML report
+locust -f locustfile.py \
+  --host=http://$ALB_DNS \
+  --users 100 \
+  --spawn-rate 10 \
+  --run-time 10m \
+  --headless \
+  --html report.html
+```
+
+**Locust features:**
+- WordPressUser: Simulates typical visitor (homepage, posts, pages)
+- HeavyUser: Aggressive load generation
+- StepLoadShape: Gradual load increase (20→200 users over 10 min)
+
+#### Alternative: Apache Bench (Quick Testing)
+
+```bash
+# Install Apache Bench
+sudo yum install httpd-tools -y
+
+# Get ALB DNS
+ALB_DNS=$(aws elbv2 describe-load-balancers \
+  --names nit-alb \
+  --query 'LoadBalancers[0].DNSName' \
+  --output text)
+
+# Run 5-minute sustained load test
+ab -t 300 -c 100 http://$ALB_DNS/
+
+# More aggressive test
+ab -n 10000 -c 100 http://$ALB_DNS/
+```
+
+#### Monitoring During Tests
+
+**Monitor Auto Scaling activities:**
+```bash
+# Watch scaling activities (updates every 5 seconds)
+watch -n 5 'aws autoscaling describe-scaling-activities \
+  --auto-scaling-group-name awsrestart-autoscaling-group \
+  --max-records 5 \
+  --query "Activities[*].[StartTime,Description,StatusCode]" \
+  --output table'
+```
+
+**Monitor CPU utilization:**
+```bash
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/EC2 \
+  --metric-name CPUUtilization \
+  --dimensions Name=AutoScalingGroupName,Value=awsrestart-autoscaling-group \
+  --start-time $(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 60 \
+  --statistics Average,Maximum \
+  --output table
+```
+
+**Monitor target health:**
+```bash
+TG_ARN=$(aws elbv2 describe-target-groups \
+  --names nit-tg \
+  --query 'TargetGroups[0].TargetGroupArn' \
+  --output text)
+
+watch -n 5 "aws elbv2 describe-target-health \
+  --target-group-arn $TG_ARN \
+  --query 'TargetHealthDescriptions[*].[Target.Id,TargetHealth.State]' \
+  --output table"
+```
+
+#### Expected Auto Scaling Timeline
+
+```
+T+0:00  - Load test starts (100 concurrent users)
+T+0:30  - CPU utilization rises (20% → 45%)
+T+1:00  - CPU reaches 70% threshold
+T+1:30  - CloudWatch alarm triggers
+T+2:00  - Auto Scaling initiates scale-out
+T+2:30  - New instance launches
+T+3:00  - New instance passes health checks
+T+3:30  - New instance added to target group
+T+4:00  - Load distributed across instances
+T+5:00  - Load test ends
+T+7:00  - CPU drops below 70%
+T+12:00 - Scale-in cooldown period ends
+T+15:00 - Auto Scaling may scale in
+```
+
+#### Success Criteria
+
+✅ CPU utilization reaches 70% during load test  
+✅ CloudWatch alarm triggers within 1-2 minutes  
+✅ New instances launch successfully  
+✅ All instances show "Healthy" in target group  
+✅ Zero failed requests during scaling  
+✅ Response times remain < 2 seconds (95th percentile)  
+✅ Instances terminate after cooldown period
+
+#### Load Testing Checklist
+
+Before testing:
+- [ ] Verify ASG min/max/desired capacity
+- [ ] Confirm scaling policy is active (70% CPU)
+- [ ] Check CloudWatch alarms enabled
+- [ ] Ensure sufficient EC2 limits
+- [ ] Set up monitoring dashboard
+
+After testing:
+- [ ] Review scaling activities
+- [ ] Analyze CloudWatch metrics
+- [ ] Check for failed requests
+- [ ] Verify scale-in behavior
+- [ ] Document results
+
+For detailed stress testing documentation, see the complete guide in the "Stress Testing and Auto Scaling Validation" section.
+
+### Step 14: Configure Monitoring (Optional)
 
 **1. Enable CloudWatch Logs**
 
