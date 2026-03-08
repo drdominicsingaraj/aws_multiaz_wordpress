@@ -6,6 +6,90 @@ This project deploys a highly available, scalable WordPress application on AWS u
 
 ## Architecture
 
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              AWS Cloud (us-east-1)                          │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │                    VPC (10.0.0.0/16)                                  │ │
+│  │                                                                       │ │
+│  │  ┌─────────────────────────────┐  ┌─────────────────────────────┐   │ │
+│  │  │   Availability Zone 1a      │  │   Availability Zone 1b      │   │ │
+│  │  │                             │  │                             │   │ │
+│  │  │  ┌───────────────────────┐  │  │  ┌───────────────────────┐  │   │ │
+│  │  │  │ Public Subnet         │  │  │  │ Public Subnet         │  │   │ │
+│  │  │  │ 10.0.1.0/24           │  │  │  │ 10.0.3.0/24           │  │   │ │
+│  │  │  │                       │  │  │  │                       │  │   │ │
+│  │  │  │  ┌─────────────────┐  │  │  │  │  ┌─────────────────┐  │  │   │ │
+│  │  │  │  │ EC2 Instance    │  │  │  │  │  │ ASG Instance    │  │  │   │ │
+│  │  │  │  │ (t3.micro)      │  │  │  │  │  │ (t2.micro)      │  │  │   │ │
+│  │  │  │  │ WordPress       │  │  │  │  │  │ WordPress       │  │  │   │ │
+│  │  │  │  └────────┬────────┘  │  │  │  │  └────────┬────────┘  │  │   │ │
+│  │  │  │           │           │  │  │  │           │           │  │   │ │
+│  │  │  │  ┌────────▼────────┐  │  │  │  │  ┌────────▼────────┐  │  │   │ │
+│  │  │  │  │ NAT Gateway     │  │  │  │  │  │ ASG Instance    │  │  │   │ │
+│  │  │  │  │ (Elastic IP)    │  │  │  │  │  │ (t2.micro)      │  │  │   │ │
+│  │  │  │  └─────────────────┘  │  │  │  │  └─────────────────┘  │  │   │ │
+│  │  │  └───────────┬───────────┘  │  │  └───────────┬───────────┘  │   │ │
+│  │  │              │               │  │              │               │   │ │
+│  │  │  ┌───────────▼───────────┐  │  │  ┌───────────▼───────────┐  │   │ │
+│  │  │  │ Private Subnet        │  │  │  │ Private Subnet        │  │   │ │
+│  │  │  │ 10.0.2.0/24           │  │  │  │ 10.0.4.0/24           │  │   │ │
+│  │  │  │                       │  │  │  │                       │  │   │ │
+│  │  │  │  ┌─────────────────┐  │  │  │  │  ┌─────────────────┐  │  │   │ │
+│  │  │  │  │ Aurora Instance │  │  │  │  │  │ Aurora Instance │  │  │   │ │
+│  │  │  │  │ (db.t3.small)   │  │  │  │  │  │ (db.t3.small)   │  │  │   │ │
+│  │  │  │  │ Writer          │◄─┼──┼──┼──┼─►│ Reader          │  │  │   │ │
+│  │  │  │  └─────────────────┘  │  │  │  │  └─────────────────┘  │  │   │ │
+│  │  │  └───────────────────────┘  │  │  └───────────────────────┘  │   │ │
+│  │  └─────────────────────────────┘  └─────────────────────────────┘   │ │
+│  │                                                                       │ │
+│  │  ┌─────────────────────────────────────────────────────────────────┐ │ │
+│  │  │              Application Load Balancer (ALB)                    │ │ │
+│  │  │              HTTP:80 → Target Group                             │ │ │
+│  │  └──────────────────────────────┬──────────────────────────────────┘ │ │
+│  │                                 │                                     │ │
+│  │  ┌──────────────────────────────▼──────────────────────────────────┐ │ │
+│  │  │              Internet Gateway (IGW)                             │ │ │
+│  │  └─────────────────────────────────────────────────────────────────┘ │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │                    S3 Bucket: deham9alblogs                           │ │
+│  │                    (ALB Access Logs + Versioning)                     │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │                    S3 Bucket: restartproject                          │ │
+│  │                    (WordPress Content Source)                         │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+                              ┌───────────────┐
+                              │   Internet    │
+                              │   Users       │
+                              └───────────────┘
+
+Traffic Flow:
+─────────────
+1. User → ALB (HTTP:80)
+2. ALB → EC2/ASG Instances (Health Check + Load Distribution)
+3. EC2/ASG → Aurora MySQL (Port 3306 via Private Subnets)
+4. EC2/ASG → S3 (WordPress Content Sync via IAM Role)
+5. Private Subnets → NAT Gateway → Internet (Outbound only)
+6. Public Subnets → Internet Gateway → Internet (Bidirectional)
+
+Security Groups:
+────────────────
+• sg_vpc: HTTP(80), HTTPS(443), SSH(22) → EC2/ASG/ALB
+• allow_ssh: SSH(22) → EC2 instances
+• allow_aurora_access: All traffic → Aurora cluster
+• allow_ec2_aurora: Outbound MySQL(3306) from EC2
+```
+
 ### Network Architecture
 
 The infrastructure uses a multi-AZ VPC design:
@@ -119,65 +203,737 @@ The infrastructure uses a multi-AZ VPC design:
 
 ## Prerequisites
 
-1. **AWS Account** with appropriate permissions
-2. **Terraform** installed (version compatible with AWS provider ~> 5.0)
-3. **AWS CLI** configured with credentials
-4. **SSH Key Pair** named "deham9-iam" created in us-east-1
-5. **IAM Instance Profile** named "deham10_ec2" with S3 read permissions
-6. **S3 Bucket** named "restartproject" with WordPress content
+### Required Software
 
-## Deployment Instructions
+1. **Terraform**
+   - Version: 1.0.0 or higher (compatible with AWS provider ~> 5.0)
+   - Installation:
+     ```bash
+     # Windows (using Chocolatey)
+     choco install terraform
+     
+     # macOS (using Homebrew)
+     brew install terraform
+     
+     # Linux (using package manager)
+     wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
+     unzip terraform_1.6.0_linux_amd64.zip
+     sudo mv terraform /usr/local/bin/
+     ```
+   - Verify installation:
+     ```bash
+     terraform version
+     ```
 
-### 1. Initialize Terraform
+2. **AWS CLI**
+   - Version: 2.x or higher
+   - Installation:
+     ```bash
+     # Windows
+     msiexec.exe /i https://awscli.amazonaws.com/AWSCLIV2.msi
+     
+     # macOS
+     curl "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "AWSCLIV2.pkg"
+     sudo installer -pkg AWSCLIV2.pkg -target /
+     
+     # Linux
+     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+     unzip awscliv2.zip
+     sudo ./aws/install
+     ```
+   - Verify installation:
+     ```bash
+     aws --version
+     ```
+
+3. **Git** (for version control)
+   ```bash
+   git --version
+   ```
+
+### AWS Account Requirements
+
+1. **AWS Account**
+   - Active AWS account with billing enabled
+   - Access to us-east-1 region
+
+2. **IAM User Credentials**
+   - IAM user with programmatic access
+   - Required permissions:
+     - EC2 (full access)
+     - VPC (full access)
+     - RDS (full access)
+     - S3 (full access)
+     - ELB (full access)
+     - Auto Scaling (full access)
+     - IAM (read access for roles)
+   
+   - Recommended: Use AWS managed policies:
+     - `AmazonEC2FullAccess`
+     - `AmazonVPCFullAccess`
+     - `AmazonRDSFullAccess`
+     - `AmazonS3FullAccess`
+     - `ElasticLoadBalancingFullAccess`
+     - `AutoScalingFullAccess`
+
+3. **Configure AWS CLI**
+   ```bash
+   aws configure
+   ```
+   
+   Enter the following when prompted:
+   ```
+   AWS Access Key ID: [Your Access Key]
+   AWS Secret Access Key: [Your Secret Key]
+   Default region name: us-east-1
+   Default output format: json
+   ```
+   
+   Verify configuration:
+   ```bash
+   aws sts get-caller-identity
+   ```
+
+### AWS Resources to Create Before Deployment
+
+#### 1. Create SSH Key Pair
+
+**Option A: Using AWS Console**
+1. Navigate to EC2 → Key Pairs
+2. Click "Create key pair"
+3. Name: `deham9-iam`
+4. Key pair type: RSA
+5. Private key format: .pem
+6. Click "Create key pair"
+7. Save the downloaded .pem file securely
+
+**Option B: Using AWS CLI**
+```bash
+aws ec2 create-key-pair \
+  --key-name deham9-iam \
+  --query 'KeyMaterial' \
+  --output text > deham9-iam.pem
+
+# Set proper permissions (Linux/macOS)
+chmod 400 deham9-iam.pem
+```
+
+#### 2. Create IAM Instance Profile for S3 Access
+
+**Step 1: Create IAM Policy**
+```bash
+# Create policy document
+cat > ec2-s3-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::restartproject",
+        "arn:aws:s3:::restartproject/*"
+      ]
+    }
+  ]
+}
+EOF
+
+# Create the policy
+aws iam create-policy \
+  --policy-name EC2-S3-ReadAccess \
+  --policy-document file://ec2-s3-policy.json
+```
+
+**Step 2: Create IAM Role**
+```bash
+# Create trust policy
+cat > ec2-trust-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+# Create the role
+aws iam create-role \
+  --role-name deham10-ec2-role \
+  --assume-role-policy-document file://ec2-trust-policy.json
+
+# Attach the policy to the role
+aws iam attach-role-policy \
+  --role-name deham10-ec2-role \
+  --policy-arn arn:aws:iam::[YOUR-ACCOUNT-ID]:policy/EC2-S3-ReadAccess
+```
+
+**Step 3: Create Instance Profile**
+```bash
+# Create instance profile
+aws iam create-instance-profile \
+  --instance-profile-name deham10_ec2
+
+# Add role to instance profile
+aws iam add-role-to-instance-profile \
+  --instance-profile-name deham10_ec2 \
+  --role-name deham10-ec2-role
+```
+
+#### 3. Create S3 Bucket for WordPress Content
+
+```bash
+# Create the bucket
+aws s3 mb s3://restartproject --region us-east-1
+
+# Upload WordPress files (if you have them locally)
+# First, download WordPress
+wget https://wordpress.org/latest.tar.gz
+tar -xzf latest.tar.gz
+
+# Upload to S3
+aws s3 sync wordpress/ s3://restartproject/
+
+# Verify upload
+aws s3 ls s3://restartproject/
+```
+
+**Alternative: Prepare WordPress with Database Configuration**
+
+If you want to pre-configure WordPress:
+
+```bash
+# Download WordPress
+wget https://wordpress.org/latest.tar.gz
+tar -xzf latest.tar.gz
+cd wordpress
+
+# Create wp-config.php from sample
+cp wp-config-sample.php wp-config.php
+
+# Edit wp-config.php with your database details
+# (You'll need to update this after Aurora is created)
+nano wp-config.php
+
+# Update these lines:
+# define('DB_NAME', 'auroradb');
+# define('DB_USER', 'admin');
+# define('DB_PASSWORD', 'wWkTAeM3n3ZQUlOBQzh0');
+# define('DB_HOST', 'your-aurora-endpoint');
+
+# Upload to S3
+cd ..
+aws s3 sync wordpress/ s3://restartproject/
+```
+
+### Verify Prerequisites
+
+Run this checklist before deployment:
+
+```bash
+# 1. Check Terraform
+terraform version
+
+# 2. Check AWS CLI
+aws --version
+
+# 3. Verify AWS credentials
+aws sts get-caller-identity
+
+# 4. Verify key pair exists
+aws ec2 describe-key-pairs --key-names deham9-iam
+
+# 5. Verify IAM instance profile exists
+aws iam get-instance-profile --instance-profile-name deham10_ec2
+
+# 6. Verify S3 bucket exists
+aws s3 ls s3://restartproject/
+
+# 7. Check available regions
+aws ec2 describe-regions --query 'Regions[?RegionName==`us-east-1`]'
+```
+
+All commands should return successful responses before proceeding with deployment.
+
+## Setup and Deployment Guide
+
+### Step 1: Clone or Download the Project
+
+```bash
+# If using Git
+git clone <repository-url>
+cd aws_multiaz_wordpress
+
+# Or download and extract the ZIP file
+# Then navigate to the project directory
+```
+
+### Step 2: Review and Customize Configuration
+
+Before deploying, review and customize the following files:
+
+**1. Update `vars.tf` (if needed)**
+```bash
+# Edit variables if you want to change defaults
+nano vars.tf
+```
+
+**2. Review `main.tf`**
+- Verify VPC CIDR blocks match your requirements
+- Check subnet configurations
+- Confirm availability zones (us-east-1a, us-east-1b)
+
+**3. Update `rds.tf`**
+⚠️ **Important**: Change the hard-coded database password
+```hcl
+# Line 18 in rds.tf
+master_password = "YOUR-SECURE-PASSWORD-HERE"
+```
+
+**4. Update `ec2.tf` and `auto_scaling.tf`**
+- Verify key pair name matches yours: `deham9-iam`
+- Verify IAM instance profile name: `deham10_ec2`
+- Update AMI IDs if needed (current: Amazon Linux 2023)
+
+**5. Update `userdata.tpl` and `userdatalaunchtemplate.tpl`**
+- Verify S3 bucket name: `restartproject`
+- Customize WordPress installation steps if needed
+
+### Step 3: Initialize Terraform
+
+Initialize the Terraform working directory:
 
 ```bash
 terraform init
 ```
 
-This downloads the required providers (AWS, Template).
+Expected output:
+```
+Initializing the backend...
+Initializing provider plugins...
+- Finding hashicorp/aws versions matching "~> 5.0"...
+- Finding hashicorp/template versions...
+- Installing hashicorp/aws v5.x.x...
+- Installing hashicorp/template v2.2.0...
 
-### 2. Review the Plan
+Terraform has been successfully initialized!
+```
+
+### Step 4: Validate Configuration
+
+Validate the Terraform configuration files:
+
+```bash
+terraform validate
+```
+
+Expected output:
+```
+Success! The configuration is valid.
+```
+
+### Step 5: Format Code (Optional)
+
+Format Terraform files for consistency:
+
+```bash
+terraform fmt
+```
+
+### Step 6: Review Deployment Plan
+
+Generate and review the execution plan:
 
 ```bash
 terraform plan
 ```
 
-Review the resources that will be created.
+This will show:
+- Resources to be created (should be ~30+ resources)
+- VPC, subnets, route tables
+- EC2 instances, Auto Scaling Group
+- Load Balancer and target groups
+- Aurora cluster and instances
+- Security groups
+- S3 bucket
 
-### 3. Apply the Configuration
+Review the plan carefully to ensure everything looks correct.
+
+**Save the plan (optional):**
+```bash
+terraform plan -out=tfplan
+```
+
+### Step 7: Deploy Infrastructure
+
+Apply the Terraform configuration:
 
 ```bash
 terraform apply
 ```
 
-Type `yes` when prompted to confirm.
+Or if you saved the plan:
+```bash
+terraform apply tfplan
+```
 
-### 4. Deployment Time
+When prompted, type `yes` to confirm.
 
-Expected deployment time: 10-15 minutes
-- VPC and networking: ~2 minutes
-- NAT Gateway: ~2 minutes
-- Aurora cluster: ~5-10 minutes
-- EC2 and ASG: ~3 minutes
+### Step 8: Monitor Deployment Progress
 
-### 5. Access the Application
+The deployment will take approximately 10-15 minutes:
 
-After deployment completes:
+```
+Deployment Timeline:
+├─ 0-2 min:   VPC, Subnets, Route Tables, Internet Gateway
+├─ 2-4 min:   NAT Gateway (with Elastic IP)
+├─ 4-6 min:   Security Groups
+├─ 6-8 min:   S3 Bucket, EC2 Instance
+├─ 8-10 min:  Load Balancer, Target Groups
+├─ 10-15 min: Aurora Cluster (longest component)
+└─ 15+ min:   Auto Scaling Group, Final configurations
+```
 
-1. Get the ALB DNS name:
-   ```bash
-   terraform output
-   ```
+Watch for any errors during deployment. Common issues:
+- Insufficient IAM permissions
+- Resource limits exceeded
+- Availability zone capacity issues
 
-2. Access WordPress:
-   ```
-   http://<alb-dns-name>
-   ```
+### Step 9: Retrieve Outputs
 
-3. SSH to EC2 instance:
-   ```bash
-   ssh -i deham9-iam.pem ec2-user@<public-ip>
-   ```
+After successful deployment, retrieve important information:
+
+```bash
+# Get all outputs
+terraform output
+
+# Get specific output
+terraform output public_ip
+```
+
+**Important Endpoints:**
+
+```bash
+# Get ALB DNS name
+aws elbv2 describe-load-balancers \
+  --names nit-alb \
+  --query 'LoadBalancers[0].DNSName' \
+  --output text
+
+# Get Aurora cluster endpoint
+aws rds describe-db-clusters \
+  --db-cluster-identifier auroracluster \
+  --query 'DBClusters[0].Endpoint' \
+  --output text
+
+# Get EC2 public IP
+terraform output public_ip
+```
+
+### Step 10: Verify Deployment
+
+**1. Check VPC and Networking**
+```bash
+# Verify VPC
+aws ec2 describe-vpcs --filters "Name=tag:Name,Values=deham9-vpc"
+
+# Verify subnets
+aws ec2 describe-subnets --filters "Name=vpc-id,Values=<vpc-id>"
+
+# Verify Internet Gateway
+aws ec2 describe-internet-gateways --filters "Name=tag:Name,Values=deham9-igw"
+
+# Verify NAT Gateway
+aws ec2 describe-nat-gateways --filter "Name=tag:Name,Values=deham9-nat-gateway"
+```
+
+**2. Check EC2 Instances**
+```bash
+# List EC2 instances
+aws ec2 describe-instances \
+  --filters "Name=tag:Name,Values=awsrestartproject" \
+  --query 'Reservations[*].Instances[*].[InstanceId,State.Name,PublicIpAddress]' \
+  --output table
+
+# Check Auto Scaling Group
+aws autoscaling describe-auto-scaling-groups \
+  --auto-scaling-group-names awsrestart-autoscaling-group
+```
+
+**3. Check Load Balancer**
+```bash
+# Verify ALB
+aws elbv2 describe-load-balancers --names nit-alb
+
+# Check target health
+aws elbv2 describe-target-health \
+  --target-group-arn <target-group-arn>
+```
+
+**4. Check Aurora Database**
+```bash
+# Verify Aurora cluster
+aws rds describe-db-clusters --db-cluster-identifier auroracluster
+
+# Check cluster instances
+aws rds describe-db-instances \
+  --filters "Name=db-cluster-id,Values=auroracluster"
+```
+
+**5. Check S3 Bucket**
+```bash
+# Verify S3 bucket
+aws s3 ls s3://deham9alblogs/
+
+# Check versioning
+aws s3api get-bucket-versioning --bucket deham9alblogs
+```
+
+### Step 11: Access and Configure WordPress
+
+**1. Access WordPress via Load Balancer**
+
+```bash
+# Get ALB DNS name
+ALB_DNS=$(aws elbv2 describe-load-balancers \
+  --names nit-alb \
+  --query 'LoadBalancers[0].DNSName' \
+  --output text)
+
+echo "Access WordPress at: http://$ALB_DNS"
+```
+
+Open the URL in your browser. You should see:
+- WordPress installation page (if fresh install)
+- WordPress site (if content was pre-configured in S3)
+
+**2. SSH to EC2 Instance**
+
+```bash
+# Get EC2 public IP
+EC2_IP=$(terraform output -raw public_ip)
+
+# SSH to instance
+ssh -i deham9-iam.pem ec2-user@$EC2_IP
+```
+
+**3. Verify Services on EC2**
+
+Once connected via SSH:
+
+```bash
+# Check Apache status
+sudo systemctl status httpd
+
+# Check MariaDB status
+sudo systemctl status mariadb
+
+# Verify WordPress files
+ls -la /var/www/html/
+
+# Check Apache logs
+sudo tail -f /var/log/httpd/access_log
+sudo tail -f /var/log/httpd/error_log
+```
+
+**4. Configure WordPress Database Connection**
+
+If WordPress is not yet configured:
+
+```bash
+# SSH to EC2 instance
+ssh -i deham9-iam.pem ec2-user@$EC2_IP
+
+# Navigate to WordPress directory
+cd /var/www/html
+
+# Get Aurora endpoint
+AURORA_ENDPOINT=$(aws rds describe-db-clusters \
+  --db-cluster-identifier auroracluster \
+  --query 'DBClusters[0].Endpoint' \
+  --output text)
+
+# Edit wp-config.php
+sudo nano wp-config.php
+
+# Update these values:
+# define('DB_NAME', 'auroradb');
+# define('DB_USER', 'admin');
+# define('DB_PASSWORD', 'wWkTAeM3n3ZQUlOBQzh0');
+# define('DB_HOST', '<aurora-endpoint>');
+
+# Set proper permissions
+sudo chown -R apache:apache /var/www/html/
+sudo chmod -R 755 /var/www/html/
+
+# Restart Apache
+sudo systemctl restart httpd
+```
+
+**5. Complete WordPress Installation**
+
+Access the WordPress installation wizard:
+```
+http://<alb-dns-name>/wp-admin/install.php
+```
+
+Follow the on-screen instructions:
+1. Select language
+2. Enter site title
+3. Create admin username and password
+4. Enter admin email
+5. Click "Install WordPress"
+
+### Step 12: Test High Availability
+
+**1. Test Load Balancer Distribution**
+
+```bash
+# Make multiple requests to see load balancing
+for i in {1..10}; do
+  curl -s http://$ALB_DNS | grep -o "Instance.*"
+  sleep 1
+done
+```
+
+**2. Test Auto Scaling**
+
+```bash
+# Get ASG name
+ASG_NAME="awsrestart-autoscaling-group"
+
+# Check current capacity
+aws autoscaling describe-auto-scaling-groups \
+  --auto-scaling-group-names $ASG_NAME \
+  --query 'AutoScalingGroups[0].[MinSize,DesiredCapacity,MaxSize]'
+
+# Manually trigger scaling (optional)
+aws autoscaling set-desired-capacity \
+  --auto-scaling-group-name $ASG_NAME \
+  --desired-capacity 2
+```
+
+**3. Test Database Failover**
+
+```bash
+# Connect to Aurora cluster
+mysql -h <aurora-endpoint> -u admin -p
+
+# Check cluster status
+SHOW STATUS LIKE 'wsrep_cluster_status';
+```
+
+### Step 13: Configure Monitoring (Optional)
+
+**1. Enable CloudWatch Logs**
+
+```bash
+# Install CloudWatch agent on EC2
+sudo yum install amazon-cloudwatch-agent -y
+
+# Configure log collection
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-config-wizard
+```
+
+**2. Create CloudWatch Dashboard**
+
+```bash
+# Create dashboard via AWS Console
+# Navigate to CloudWatch → Dashboards → Create dashboard
+# Add widgets for:
+# - EC2 CPU utilization
+# - ALB request count
+# - Aurora connections
+# - Auto Scaling group metrics
+```
+
+### Step 14: Backup Configuration
+
+Save your Terraform state and configuration:
+
+```bash
+# Backup terraform.tfstate
+cp terraform.tfstate terraform.tfstate.backup
+
+# Backup .terraform directory
+tar -czf terraform-backup.tar.gz .terraform/
+
+# Store securely (DO NOT commit to public repositories)
+```
+
+### Post-Deployment Checklist
+
+- [ ] WordPress is accessible via ALB DNS
+- [ ] All EC2 instances are healthy in target group
+- [ ] Auto Scaling Group has 2 running instances
+- [ ] Aurora cluster has 2 instances (writer + reader)
+- [ ] Database connection is working
+- [ ] S3 bucket is receiving ALB logs
+- [ ] SSH access to EC2 instances works
+- [ ] Security groups are properly configured
+- [ ] CloudWatch monitoring is enabled (optional)
+- [ ] Backup strategy is in place
+
+### Troubleshooting Deployment Issues
+
+**Issue: Terraform init fails**
+```bash
+# Clear Terraform cache
+rm -rf .terraform .terraform.lock.hcl
+
+# Re-initialize
+terraform init
+```
+
+**Issue: Insufficient IAM permissions**
+```bash
+# Check current IAM permissions
+aws iam get-user
+aws iam list-attached-user-policies --user-name <your-username>
+
+# Contact AWS administrator to grant required permissions
+```
+
+**Issue: Resource already exists**
+```bash
+# Import existing resource
+terraform import aws_vpc.dev_vpc <vpc-id>
+
+# Or destroy and recreate
+terraform destroy
+terraform apply
+```
+
+**Issue: Aurora cluster creation timeout**
+```bash
+# Check Aurora cluster status
+aws rds describe-db-clusters --db-cluster-identifier auroracluster
+
+# Wait for status to be 'available'
+# This can take 10-15 minutes
+```
+
+**Issue: EC2 instances not healthy**
+```bash
+# Check instance status
+aws ec2 describe-instance-status --instance-ids <instance-id>
+
+# Check system logs
+aws ec2 get-console-output --instance-id <instance-id>
+
+# SSH and check services
+ssh -i deham9-iam.pem ec2-user@<public-ip>
+sudo systemctl status httpd
+```
 
 ## Instance Initialization
 
