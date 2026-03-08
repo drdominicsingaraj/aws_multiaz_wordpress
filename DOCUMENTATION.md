@@ -985,17 +985,208 @@ ALB access logs are stored in the S3 bucket: `s3://deham9alblogs/`
 
 ## Cost Estimation
 
-Monthly cost estimate (us-east-1):
+### Detailed Cost Breakdown (us-east-1 Region)
 
-- EC2 t3.micro (1 instance): ~$7.50
-- EC2 t2.micro (2 ASG instances): ~$15.00
-- Aurora db.t3.small (2 instances): ~$73.00
-- ALB: ~$16.20
-- NAT Gateway: ~$32.40
-- Data transfer: Variable
-- S3 storage: Minimal
+#### Compute Resources
 
-**Total estimated monthly cost**: ~$144-150 (excluding data transfer)
+| Resource | Specification | Hourly Rate | Daily Cost | Monthly Cost |
+|----------|--------------|-------------|------------|--------------|
+| EC2 t3.micro (1 instance) | 2 vCPU, 1 GB RAM | $0.0104 | $0.25 | $7.59 |
+| EC2 t2.micro (2 ASG instances) | 1 vCPU, 1 GB RAM each | $0.0116 × 2 | $0.56 | $16.70 |
+| **Compute Subtotal** | | | **$0.81** | **$24.29** |
+
+#### Database
+
+| Resource | Specification | Hourly Rate | Daily Cost | Monthly Cost |
+|----------|--------------|-------------|------------|--------------|
+| Aurora MySQL db.t3.small (Writer) | 2 vCPU, 2 GB RAM | $0.041 | $0.98 | $29.93 |
+| Aurora MySQL db.t3.small (Reader) | 2 vCPU, 2 GB RAM | $0.041 | $0.98 | $29.93 |
+| Aurora Storage (10 GB) | First 10 GB | $0.10/GB-month | $0.03 | $1.00 |
+| Aurora I/O (1M requests) | Per 1M requests | $0.20 | $0.20 | $6.00 |
+| **Database Subtotal** | | | **$2.19** | **$66.86** |
+
+#### Networking
+
+| Resource | Specification | Hourly Rate | Daily Cost | Monthly Cost |
+|----------|--------------|-------------|------------|--------------|
+| Application Load Balancer | ALB hours | $0.0225 | $0.54 | $16.43 |
+| ALB LCU (Load Balancer Capacity Units) | ~5 LCUs average | $0.008 × 5 | $0.96 | $29.20 |
+| NAT Gateway | Data processing | $0.045 | $1.08 | $32.85 |
+| NAT Gateway Data Transfer | 10 GB/day | $0.045/GB | $0.45 | $13.50 |
+| Elastic IP (NAT Gateway) | Associated with NAT | $0.00 | $0.00 | $0.00 |
+| Data Transfer Out (Internet) | 10 GB/day to internet | $0.09/GB | $0.90 | $27.00 |
+| **Networking Subtotal** | | | **$3.93** | **$119.98** |
+
+#### Storage
+
+| Resource | Specification | Daily Rate | Daily Cost | Monthly Cost |
+|----------|--------------|------------|------------|--------------|
+| S3 Standard Storage (deham9alblogs) | 1 GB ALB logs | $0.023/GB-month | $0.001 | $0.02 |
+| S3 Standard Storage (restartproject) | 500 MB WordPress | $0.023/GB-month | $0.0004 | $0.01 |
+| S3 PUT/COPY/POST Requests | 1,000 requests/day | $0.005/1000 | $0.005 | $0.15 |
+| S3 GET Requests | 10,000 requests/day | $0.0004/1000 | $0.004 | $0.12 |
+| **Storage Subtotal** | | | **$0.01** | **$0.30** |
+
+#### Additional Costs
+
+| Resource | Specification | Daily Cost | Monthly Cost |
+|----------|--------------|------------|--------------|
+| EBS Volumes (3 instances × 8 GB) | gp3 volumes | $0.03 | $0.96 |
+| CloudWatch Logs (optional) | 1 GB ingestion | $0.02 | $0.50 |
+| CloudWatch Metrics (optional) | Custom metrics | $0.01 | $0.30 |
+| Route 53 (if used) | Hosted zone | $0.02 | $0.50 |
+| **Additional Subtotal** | | **$0.08** | **$2.26** |
+
+### Total Cost Summary
+
+| Period | Cost (USD) | Notes |
+|--------|-----------|-------|
+| **Hourly** | **$0.29** | Average per hour |
+| **Daily** | **$7.02** | 24-hour period |
+| **Weekly** | **$49.14** | 7-day period |
+| **Monthly** | **$213.69** | 30-day period (730 hours) |
+| **Yearly** | **$2,564.28** | 365-day period |
+
+### Cost Breakdown by Category
+
+```
+Daily Cost Distribution:
+├─ Networking:     $3.93 (56%)  ████████████████████████████
+├─ Database:       $2.19 (31%)  ███████████████
+├─ Compute:        $0.81 (12%)  ██████
+├─ Additional:     $0.08 (1%)   █
+└─ Storage:        $0.01 (<1%)  █
+                   ─────
+Total:             $7.02/day
+```
+
+### Cost Optimization Strategies
+
+#### Immediate Savings (Can reduce daily cost to ~$4.50)
+
+1. **Remove Duplicate EC2 Instance** (-$0.25/day)
+   - Currently running both standalone EC2 and ASG
+   - Remove standalone instance, use only ASG
+   ```bash
+   # Comment out or remove in ec2.tf
+   # resource "aws_instance" "instance" { ... }
+   ```
+
+2. **Reduce ASG to 1 Instance During Low Traffic** (-$0.28/day)
+   - Change min_size from 2 to 1 in auto_scaling.tf
+   - Scales up automatically when needed
+   ```hcl
+   min_size = 1
+   desired_capacity = 1
+   ```
+
+3. **Use Aurora Serverless v2** (-$1.50/day)
+   - Automatically scales based on demand
+   - Minimum ACUs: 0.5 (~$0.12/hour)
+   - Only pay for actual usage
+
+4. **Schedule Resources for Non-Production** (-$2.00/day)
+   - Stop instances during off-hours (e.g., nights, weekends)
+   - Use AWS Instance Scheduler or Lambda
+   - Example: Run only 12 hours/day = 50% savings
+
+#### Long-Term Savings (Can reduce monthly cost by 40-60%)
+
+1. **Reserved Instances** (1-year commitment)
+   - EC2 Reserved Instances: 30-40% discount
+   - RDS Reserved Instances: 35-45% discount
+   - Savings: ~$60-80/month
+
+2. **Savings Plans** (1 or 3-year commitment)
+   - Compute Savings Plans: Up to 66% discount
+   - More flexible than Reserved Instances
+   - Savings: ~$70-100/month
+
+3. **Use Spot Instances for ASG** (for non-critical workloads)
+   - Up to 90% discount vs On-Demand
+   - Risk: Can be interrupted
+   - Savings: ~$0.50/day on ASG instances
+
+4. **Optimize Data Transfer**
+   - Use CloudFront CDN to reduce data transfer costs
+   - Enable S3 Transfer Acceleration
+   - Compress content (gzip)
+   - Savings: ~$0.50-1.00/day
+
+5. **Right-Size Resources**
+   - Monitor actual usage with CloudWatch
+   - Downgrade instance types if underutilized
+   - Example: t3.micro → t3.nano = 50% savings
+   - Savings: ~$0.40/day
+
+### Free Tier Eligibility (First 12 Months)
+
+If you're within AWS Free Tier (first 12 months):
+
+| Service | Free Tier Allowance | Monthly Savings |
+|---------|-------------------|-----------------|
+| EC2 t2.micro | 750 hours/month | $7.59 |
+| EBS gp2/gp3 | 30 GB | $0.96 |
+| ALB | 750 hours + 15 LCUs | $16.43 |
+| RDS | 750 hours db.t2.micro* | N/A (using Aurora) |
+| S3 | 5 GB storage + requests | $0.30 |
+| Data Transfer | 15 GB/month | $1.35 |
+
+**Potential Free Tier Savings**: ~$26/month (~$0.87/day)
+
+*Note: Aurora is not included in Free Tier, but RDS MySQL/PostgreSQL is.
+
+### Cost Monitoring and Alerts
+
+Set up billing alerts to avoid surprises:
+
+```bash
+# Create billing alarm (via AWS CLI)
+aws cloudwatch put-metric-alarm \
+  --alarm-name daily-cost-alert \
+  --alarm-description "Alert when daily cost exceeds $10" \
+  --metric-name EstimatedCharges \
+  --namespace AWS/Billing \
+  --statistic Maximum \
+  --period 86400 \
+  --evaluation-periods 1 \
+  --threshold 10 \
+  --comparison-operator GreaterThanThreshold
+
+# Create budget (via AWS Console)
+# Navigate to: AWS Billing → Budgets → Create budget
+# Set daily budget: $7-10
+# Set monthly budget: $200-250
+```
+
+### Cost Comparison: Alternative Architectures
+
+| Architecture | Daily Cost | Monthly Cost | Trade-offs |
+|--------------|-----------|--------------|------------|
+| **Current (Multi-AZ HA)** | $7.02 | $213.69 | High availability, fault-tolerant |
+| **Single AZ** | $4.50 | $137.00 | Lower cost, no HA |
+| **Aurora Serverless** | $5.20 | $158.40 | Auto-scaling, pay-per-use |
+| **RDS MySQL (t3.micro)** | $4.80 | $146.00 | Lower cost, less scalable |
+| **Single EC2 + RDS** | $2.50 | $76.00 | Minimal cost, no HA/scaling |
+| **Lightsail** | $1.67 | $50.00 | Simplest, limited features |
+
+### Real-World Cost Example
+
+**Scenario**: Small business WordPress site with moderate traffic
+- 10,000 page views/day
+- 50 GB data transfer/month
+- Running 16 hours/day (business hours)
+
+**Optimized Daily Cost**: ~$4.50
+- EC2 t3.micro (1 instance, 16h): $0.17
+- Aurora t3.small (1 instance, 16h): $1.31
+- ALB (16h): $0.36
+- NAT Gateway (16h): $0.72
+- Data transfer: $1.50
+- Storage: $0.01
+- Other: $0.43
+
+**Monthly Cost**: ~$137.00 (36% savings vs 24/7 operation)
 
 ## Security Considerations
 
