@@ -4,14 +4,14 @@
 # Target group for load balancer
 # Defines the targets (EC2 instances) that the load balancer will route traffic to
 resource "aws_lb_target_group" "target-group" {
-  name        = "nit-tg"
+  name        = "${local.prefix}-tg"
   port        = 80         # Port that targets receive traffic on
   protocol    = "HTTP"     # Protocol for routing requests
   target_type = "instance" # Target type (instance, IP, or lambda)
-  vpc_id      = aws_vpc.dev_vpc.id
+  vpc_id      = aws_vpc.main.id
 
   tags = {
-    Name = "deham9-target-group"
+    Name = "${local.prefix}-target-group"
   }
 
   # Health check configuration
@@ -22,35 +22,116 @@ resource "aws_lb_target_group" "target-group" {
     path                = "/"            # Health check path
     port                = "traffic-port" # Use the same port as target
     protocol            = "HTTP"
-    timeout             = 5 # Health check timeout
-    healthy_threshold   = 2 # Consecutive successful checks to mark healthy
-    unhealthy_threshold = 2 # Consecutive failed checks to mark unhealthy
+    matcher             = "200-399" # A fresh WordPress answers 302 (installer redirect)
+    timeout             = 5         # Health check timeout
+    healthy_threshold   = 2         # Consecutive successful checks to mark healthy
+    unhealthy_threshold = 2         # Consecutive failed checks to mark unhealthy
   }
 }
 
 # Application Load Balancer
 # Distributes incoming traffic across multiple EC2 instances for high availability
 resource "aws_lb" "application-lb" {
-  name               = "nit-alb"
+  name               = "${local.prefix}-alb"
   internal           = false                                            # Internet-facing ALB
   load_balancer_type = "application"                                    # Application Load Balancer
   subnets            = [aws_subnet.public-1.id, aws_subnet.public-2.id] # Deploy across public subnets
-  security_groups    = [aws_security_group.sg_vpc.id]                   # Security group for ALB
+  security_groups    = [aws_security_group.sg_alb.id]                   # ALB-only security group
   ip_address_type    = "ipv4"                                           # IPv4 addressing
 
+  enable_deletion_protection = var.deletion_protection
+  drop_invalid_header_fields = true # Drop malformed HTTP headers (request smuggling hardening)
+
+  # Access logs go to the S3 log bucket (the bucket policy must exist first)
+  access_logs {
+    bucket  = aws_s3_bucket.alb_logs.id
+    prefix  = local.alb_log_prefix
+    enabled = true
+  }
+
+  depends_on = [aws_s3_bucket_policy.alb_logs]
+
   tags = {
-    Name = "deham9-application-lb"
+    Name = "${local.prefix}-application-lb"
   }
 }
 
 # Load balancer listener
-# Defines how the ALB listens for requests and routes them to targets
+# Defines how the ALB listens for requests and routes them to targets.
+#   - with CloudFront: only requests carrying the origin secret header are served (rule below),
+#     everything else (anyone who found the ALB address) gets a 403
+#   - with certificate_arn (no CloudFront): HTTP only redirects to HTTPS
 resource "aws_lb_listener" "alb-listener" {
   load_balancer_arn = aws_lb.application-lb.arn
   port              = "80"   # Listen on port 80 (HTTP)
   protocol          = "HTTP" # HTTP protocol
 
-  # Default action - forward traffic to target group
+  dynamic "default_action" {
+    for_each = local.cloudfront_enabled ? [1] : []
+    content {
+      type = "fixed-response"
+
+      fixed_response {
+        content_type = "text/plain"
+        message_body = "Forbidden"
+        status_code  = "403"
+      }
+    }
+  }
+
+  dynamic "default_action" {
+    for_each = !local.cloudfront_enabled && var.certificate_arn == "" ? [1] : []
+    content {
+      type             = "forward"
+      target_group_arn = aws_lb_target_group.target-group.arn
+    }
+  }
+
+  dynamic "default_action" {
+    for_each = !local.cloudfront_enabled && var.certificate_arn != "" ? [1] : []
+    content {
+      type = "redirect"
+
+      redirect {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+  }
+}
+
+# Requests from CloudFront carry X-Origin-Verify: forward only those to WordPress
+resource "aws_lb_listener_rule" "from_cloudfront" {
+  count = local.cloudfront_enabled ? 1 : 0
+
+  listener_arn = aws_lb_listener.alb-listener.arn
+  priority     = 1
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.target-group.arn
+  }
+
+  condition {
+    http_header {
+      http_header_name = "X-Origin-Verify"
+      values           = [random_password.origin_secret[0].result]
+    }
+  }
+}
+
+# HTTPS listener (only when an ACM certificate is provided and CloudFront is not used;
+# with CloudFront the ALB security group does not open 443)
+resource "aws_lb_listener" "https" {
+  count = var.certificate_arn == "" || local.cloudfront_enabled ? 0 : 1
+
+  load_balancer_arn = aws_lb.application-lb.arn
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = var.certificate_arn
+
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.target-group.arn

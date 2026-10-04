@@ -1,4 +1,4 @@
-# Terraform and provider configuration for the dev environment
+# Terraform and provider configuration for the test environment
 terraform {
   required_version = ">= 1.7"
 

@@ -4,14 +4,14 @@ This script simulates realistic user behavior on a WordPress site
 
 Usage:
   # Run with web UI (access at http://localhost:8089)
-  locust -f locustfile.py --host=http://<alb-dns>
+  locust -f locustfile.py --host=https://<site_url domain>
   
   # Run headless (no web UI)
-  locust -f locustfile.py --host=http://<alb-dns> \
+  locust -f locustfile.py --host=https://<site_url domain> \
     --users 100 --spawn-rate 10 --run-time 10m --headless
   
   # Run with HTML report
-  locust -f locustfile.py --host=http://<alb-dns> \
+  locust -f locustfile.py --host=https://<site_url domain> \
     --users 100 --spawn-rate 10 --run-time 10m \
     --headless --html report.html
 """
@@ -164,14 +164,14 @@ class StepLoadShape(LoadTestShape):
 # Example usage commands:
 """
 # Basic test with 100 users
-locust -f locustfile.py --host=http://your-alb-dns.amazonaws.com --users 100 --spawn-rate 10 --run-time 10m --headless
+locust -f locustfile.py --host=https://<your-cloudfront-domain> --users 100 --spawn-rate 10 --run-time 10m --headless
 
 # Test with step load shape
-locust -f locustfile.py --host=http://your-alb-dns.amazonaws.com --headless
+locust -f locustfile.py --host=https://<your-cloudfront-domain> --headless
 
 # Test with HTML report
-locust -f locustfile.py --host=http://your-alb-dns.amazonaws.com --users 100 --spawn-rate 10 --run-time 10m --headless --html report.html --csv results
+locust -f locustfile.py --host=https://<your-cloudfront-domain> --users 100 --spawn-rate 10 --run-time 10m --headless --html report.html --csv results
 
 # Heavy load test
-locust -f locustfile.py --host=http://your-alb-dns.amazonaws.com --user-classes HeavyUser --users 50 --spawn-rate 5 --run-time 5m --headless
+locust -f locustfile.py --host=https://<your-cloudfront-domain> --user-classes HeavyUser --users 50 --spawn-rate 5 --run-time 5m --headless
 """

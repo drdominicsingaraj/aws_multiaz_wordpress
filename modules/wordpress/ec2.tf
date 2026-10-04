@@ -1,66 +1,48 @@
-# Local values for consistent naming and tagging
-# These values are used throughout the configuration for consistency
-locals {
-  name  = "awsrestartproject" # Base name for EC2 instances
-  owner = "ds"                # Owner identifier for resource tracking
-}
-
-# Data source to fetch the latest Amazon Linux 2023 AMI
-# This ensures we always use the most recent AMI for security updates
-data "aws_ami" "latest_linux_ami" {
-  most_recent = true
-  owners      = ["amazon"] # Only consider AMIs owned by Amazon
-
-  # Filter for Amazon Linux 2023 AMIs for x86_64 architecture
-  filter {
-    name   = "name"
-    values = ["al2023-ami-2023*x86_64"]
-  }
-}
-
-# EC2 instance for WordPress application
-# This instance will host the WordPress application and connect to RDS
+# Standalone EC2 instance for WordPress
+# Sits in the first public subnet and is attached to the load balancer target group.
+# Separate from the ASG instances; set standalone_instance_count = 0 to omit it.
+# Boots with the same script as the ASG instances (mounts the shared EFS).
 resource "aws_instance" "instance" {
-  # Using predefined AMI from variables instead of data source for consistency
-  ami                         = var.AMIs[var.AWS_REGION]
-  instance_type               = "t3.micro"                     # Free tier eligible
-  availability_zone           = "us-east-1a"                   # Same AZ as public subnet
-  associate_public_ip_address = true                           # Assign public IP
-  key_name                    = "deham9-iam"                   # SSH key pair name
-  vpc_security_group_ids      = [aws_security_group.sg_vpc.id] # Security group
-  subnet_id                   = aws_subnet.public-1.id         # Deploy in public subnet
-  iam_instance_profile        = "deham10_ec2"                  # IAM role for S3 access
-  count                       = 1                              # Single instance
+  count = var.standalone_instance_count
+
+  ami                         = local.ami_id
+  instance_type               = var.instance_type
+  associate_public_ip_address = !var.web_tier_in_private_subnets
+  key_name                    = var.key_name
+  vpc_security_group_ids      = [aws_security_group.sg_vpc.id, aws_security_group.allow_ssh.id]
+  subnet_id                   = local.web_subnet_ids[0]
+  iam_instance_profile        = aws_iam_instance_profile.web.name # SSM + read access to the DB secret (iam.tf)
 
   tags = {
-    Name = local.name
+    Name = "${local.prefix}-wordpress"
     Type = "WordPress-Server"
   }
 
-  # User data script for initial server setup
-  user_data = base64encode(data.template_file.ec2userdatatemplate.rendered)
+  # Boot script shared with the ASG instances (mounts the EFS, installs WordPress on first boot)
+  user_data = local.web_user_data
+
+  # Require IMDSv2 (session tokens)
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
+  # Encrypted root volume
+  root_block_device {
+    encrypted = true
+  }
+
+  # A newer AMI must not replace the instance (the ASG instances roll automatically)
+  lifecycle {
+    ignore_changes = [ami]
+  }
+
+  # The EFS mount targets must exist before the instance boots
+  depends_on = [aws_efs_mount_target.public-1, aws_efs_mount_target.public-2]
 
   # Local provisioner to log instance metadata
   provisioner "local-exec" {
     command = "echo Instance Type = ${self.instance_type}, Instance ID = ${self.id}, Public IP = ${self.public_ip}, AMI ID = ${self.ami} >> metadata"
   }
-}
-
-
-# Template file data source for user data script
-# Reads the user data script from external template file
-data "template_file" "ec2userdatatemplate" {
-  template = file("userdata.tpl") # Removed unnecessary string interpolation
-}
-
-# Output the rendered user data template for debugging
-output "ec2rendered" {
-  description = "Rendered user data script for EC2 instance"
-  value       = data.template_file.ec2userdatatemplate.rendered
-}
-
-# Output the public IP address of the EC2 instance
-output "public_ip" {
-  description = "Public IP address of the WordPress server"
-  value       = aws_instance.instance[0].public_ip
 }

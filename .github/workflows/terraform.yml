@@ -1,0 +1,65 @@
+name: terraform
+
+# Static checks only: no AWS credentials and nothing is deployed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.9"
+
+      - name: Format
+        run: terraform fmt -check -recursive
+
+      - name: Unit tests (mocked provider)
+        working-directory: modules/wordpress
+        run: |
+          terraform init -backend=false
+          terraform test
+
+      - name: Validate environments
+        run: |
+          for env in dev test prod; do
+            (cd environments/$env && terraform init -backend=false && terraform validate)
+          done
+          (cd bootstrap && terraform init -backend=false && terraform validate)
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Misconfiguration scan of the Terraform code; findings are reported, not blocking yet
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: terraform
+          soft_fail: true
+          quiet: true
+
+  diagrams:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The SVG diagrams are generated from terraform.tfvars; fail if they are stale
+      - name: Diagrams are up to date
+        run: |
+          python docs/gen_diagrams.py
+          git diff --exit-code docs/

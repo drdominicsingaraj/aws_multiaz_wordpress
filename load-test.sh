@@ -11,7 +11,10 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-ASG_NAME="awsrestart-autoscaling-group"
+ENVIRONMENT="${1:-dev}"            # dev, test or prod (usage: ./load-test.sh <env>)
+PROJECT="deham9"
+ASG_NAME="${PROJECT}-${ENVIRONMENT}-asg"
+ALB_NAME="${PROJECT}-${ENVIRONMENT}-alb"
 REGION="us-east-1"
 TEST_DURATION=300  # 5 minutes
 CONCURRENT_USERS=100
@@ -21,7 +24,7 @@ echo -e "${GREEN}=== WordPress Auto Scaling Load Test ===${NC}\n"
 # 1. Get initial state
 echo -e "${YELLOW}=== Step 1: Getting Initial State ===${NC}"
 ALB_DNS=$(aws elbv2 describe-load-balancers \
-  --names nit-alb \
+  --names "$ALB_NAME" \
   --region $REGION \
   --query 'LoadBalancers[0].DNSName' \
   --output text)
@@ -32,6 +35,18 @@ if [ -z "$ALB_DNS" ]; then
 fi
 
 echo "ALB DNS: $ALB_DNS"
+
+# With CloudFront in front, the ALB only accepts CloudFront traffic: test through the distribution.
+# (WAF rate limiting is per IP; disable enable_waf in the environment, or set TARGET_URL, for heavy tests.)
+CF_DOMAIN=$(aws cloudfront list-distributions   --query "DistributionList.Items[?Comment=='${PROJECT}-${ENVIRONMENT} WordPress'].DomainName | [0]"   --output text 2>/dev/null)
+if [ -n "$TARGET_URL" ]; then
+  :
+elif [ -n "$CF_DOMAIN" ] && [ "$CF_DOMAIN" != "None" ]; then
+  TARGET_URL="https://$CF_DOMAIN/"
+else
+  TARGET_URL="http://$ALB_DNS/"
+fi
+echo "Target URL: $TARGET_URL"
 echo -e "\nCurrent ASG Configuration:"
 aws autoscaling describe-auto-scaling-groups \
   --auto-scaling-group-names $ASG_NAME \
@@ -106,14 +121,14 @@ echo -e "\n${YELLOW}=== Step 4: Starting Load Test ===${NC}"
 echo "Test Configuration:"
 echo "  - Duration: ${TEST_DURATION} seconds ($(($TEST_DURATION / 60)) minutes)"
 echo "  - Concurrent Users: $CONCURRENT_USERS"
-echo "  - Target: http://$ALB_DNS/"
+echo "  - Target: $TARGET_URL"
 echo ""
 
 AB_RESULTS="ab-results-$(date +%Y%m%d-%H%M%S).txt"
 AB_GNUPLOT="ab-results-$(date +%Y%m%d-%H%M%S).tsv"
 
 echo "Running Apache Bench test..."
-ab -t $TEST_DURATION -c $CONCURRENT_USERS -g $AB_GNUPLOT http://$ALB_DNS/ > $AB_RESULTS 2>&1
+ab -t $TEST_DURATION -c $CONCURRENT_USERS -g $AB_GNUPLOT $TARGET_URL > $AB_RESULTS 2>&1
 
 echo -e "${GREEN}Load test completed${NC}"
 echo "Results saved to: $AB_RESULTS"
