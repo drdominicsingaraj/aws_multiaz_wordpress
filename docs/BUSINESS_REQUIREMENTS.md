@@ -35,6 +35,12 @@ The business needs a public WordPress website that stays online through an Avail
 | BR-9 | Optional Redis object cache to cut database load and page latency. | Should |
 | BR-10 | Environments deploy with one command and are validated by automated tests and CI before release. | Should |
 | BR-11 | Cost levers: off-hours scaling schedule, no NAT gateway by default, right-sized instances in dev and test. | Could |
+| BR-12 | Uploads and themes are stored on shared, encrypted storage (EFS), so every web server serves the same files and nothing is lost when an instance is replaced. | Must |
+| BR-13 | Dev, test and prod are isolated from each other: separate networks and separate Terraform state. | Should |
+| BR-14 | New web servers set themselves up with no manual steps. WordPress is installed exactly once and uses its own database user, not the master credentials. | Must |
+| BR-15 | The site holds up under load: 100 concurrent users with under 1% errors and a p95 response time of 2 s or less. | Should |
+| BR-16 | Terraform state is stored remotely with locking, so two people cannot apply at once. | Should |
+| BR-17 | Architecture diagrams, documentation and the cost estimate stay in step with the code. | Could |
 
 ## 5. Environments, constraints and assumptions
 
