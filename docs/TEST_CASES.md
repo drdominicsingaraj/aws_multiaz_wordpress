@@ -2,7 +2,7 @@
 
 Date: 2026-10-10. Traces to [BUSINESS_REQUIREMENTS.md](BUSINESS_REQUIREMENTS.md).
 
-**Test levels:** **A** = automated, no AWS needed (`terraform test`, `fmt`, `validate`, CI). **D** = deployed environment (manual or scripted). Run deployed tests in dev or test first; prod only for read-only checks unless a change window is agreed.
+**Test levels:** **A** = automated, no AWS needed (`terraform test`, `fmt`, `validate`, CI). **D** = deployed environment (manual or scripted). **M** = manual review, no AWS needed. Run deployed tests in dev or test first; prod only for read-only checks unless a change window is agreed.
 
 **Setup (level A):** `cd modules/wordpress && terraform init -backend=false && terraform test`
 **Setup (level D):** `./deploy.sh <env> apply`, then take the `site_url` output as `<site>`.
@@ -14,7 +14,7 @@ Date: 2026-10-10. Traces to [BUSINESS_REQUIREMENTS.md](BUSINESS_REQUIREMENTS.md)
 | TC-01 | BR-10 | Formatting | `terraform fmt -recursive -check` | No files reported | A |
 | TC-02 | BR-10 | Validation | `terraform validate` in dev, test, prod and bootstrap | Success in all four | A |
 | TC-03 | BR-10 | Module unit tests | `terraform test` in `modules/wordpress` | All assertions pass | A |
-| TC-04 | BR-10 | Diagram freshness | `python docs/gen_diagrams.py`, then `git diff docs` | No changes to the SVG files | A |
+| TC-04 | BR-10, BR-17 | Diagram freshness | `python docs/gen_diagrams.py`, then `git diff docs` | No changes to the SVG files | A |
 | TC-05 | BR-10 | CI pipeline | Push a branch | fmt, tests, validate and diagram jobs are green; Checkov findings reviewed | A |
 | TC-06 | BR-2 | Instance and architecture precondition | Plan with `cpu_architecture = "arm64"` and an x86 instance type | Plan fails with the precondition message | A |
 | TC-07 | BR-3 | WAF region precondition | Plan with `enable_waf = true` in a region other than us-east-1 | Plan fails with the precondition message | A |
@@ -28,8 +28,8 @@ Date: 2026-10-10. Traces to [BUSINESS_REQUIREMENTS.md](BUSINESS_REQUIREMENTS.md)
 | TC-11 | BR-1, BR-2 | Instance failure | Terminate one web instance | Site stays up; ASG launches a replacement; target group returns to healthy | D |
 | TC-12 | BR-1 | AZ failure simulation | Terminate all web instances in one AZ (dev or test) | Site keeps serving from the other AZ; ASG rebalances | D |
 | TC-13 | BR-1 | Database failover | Fail over the Aurora cluster (`aws rds failover-db-cluster`) | Brief interruption only; writer moves to the other AZ; site recovers without manual action | D |
-| TC-14 | BR-2 | Scale out under load | `./load-test.sh <env>` or `locust -f locustfile.py --host=https://<cloudfront domain>` | Scaling policy triggers; desired capacity rises above the starting value and stays at or below `asg_max_size` | D |
-| TC-15 | BR-2 | Scale in after load | Stop the load test and wait for cool-down | Capacity returns toward `asg_min_size` | D |
+| TC-14 | BR-2, BR-15 | Scale out under load | `./load-test.sh <env>` or `locust -f locustfile.py --host=https://<cloudfront domain>` | Scaling policy triggers; desired capacity rises above the starting value and stays at or below `asg_max_size` | D |
+| TC-15 | BR-2, BR-15 | Scale in after load | Stop the load test and wait for cool-down | Capacity returns toward `asg_min_size` | D |
 | TC-16 | BR-2 | Health check replacement | Stop Apache on one instance | ELB health check marks it unhealthy; ASG replaces it | D |
 | TC-17 | BR-11 | Off-hours schedule | Set `enable_off_hours_schedule = true` and apply | Scheduled actions exist; capacity drops to `off_hours_capacity` at 19:00 UTC and returns at 06:00 UTC Mon-Fri | D |
 
@@ -43,8 +43,8 @@ Date: 2026-10-10. Traces to [BUSINESS_REQUIREMENTS.md](BUSINESS_REQUIREMENTS.md)
 | TC-23 | BR-3 | WAF blocks abuse | Send requests above the rate limit from one IP | Requests are blocked (403); events appear in the WAF log group | D |
 | TC-24 | BR-3 | Security group scope | Inspect `sg_alb`, `sg_vpc`, Aurora, EFS and cache groups | ALB: port 80 from the CloudFront prefix list only; web: 80 from ALB only; DB 3306, EFS 2049 and cache 6379 from the web group only | D |
 | TC-25 | BR-4 | Encryption at rest | Check Aurora, EFS, root volumes, ElastiCache and S3 | All report encryption enabled | D |
-| TC-26 | BR-4 | Encryption in transit | Mount EFS without TLS; connect to Redis without TLS | Both are refused | D |
-| TC-27 | BR-4 | Secrets handling | Review boot logs (`/var/log/cloud-init-output.log`) and Terraform output | No passwords printed; database password is held in Secrets Manager | D |
+| TC-26 | BR-4, BR-12 | Encryption in transit | Mount EFS without TLS; connect to Redis without TLS | Both are refused | D |
+| TC-27 | BR-4, BR-14 | Secrets handling | Review boot logs (`/var/log/cloud-init-output.log`) and Terraform output | No passwords printed; database password is held in Secrets Manager | D |
 | TC-28 | BR-4 | IMDSv2 enforced | `curl http://169.254.169.254/latest/meta-data/` from an instance without a token | Request is rejected (401) | D |
 | TC-29 | BR-5 | No SSH, SSM works | Try `ssh` to an instance; run `aws ssm start-session --target <id>` | SSH times out; SSM session opens | D |
 | TC-30 | BR-4 | Aurora not public | Connect to the Aurora endpoint from outside the VPC | No connection (`db_publicly_accessible = false`) | D |
@@ -67,10 +67,12 @@ Date: 2026-10-10. Traces to [BUSINESS_REQUIREMENTS.md](BUSINESS_REQUIREMENTS.md)
 | --- | --- | --- | --- | --- | --- |
 | TC-50 | BR-8 | Prod deletion protection | `terraform destroy` plan or `aws rds delete-db-cluster` on prod | Blocked by deletion protection | D |
 | TC-51 | BR-8 | Backup retention and snapshot | Check `db_backup_retention_days` (prod: 14); restore a snapshot into a test cluster | Backups exist; restore succeeds | D |
-| TC-52 | BR-8 | Shared file system | Upload a media file on one instance; read it on another | File is present on all instances (EFS) | D |
+| TC-52 | BR-12 | Shared file system | Upload a media file on one instance; read it on another | File is present on all instances (EFS) | D |
 | TC-53 | BR-9 | Object cache active | With `enable_object_cache = true`, check WordPress cache status and Redis metrics | Cache hits recorded; database load lower than with cache off | D |
 | TC-54 | BR-9 | Static content caching | Request `/wp-content/...` twice | Second response shows a CloudFront cache hit; dynamic pages are not cached | D |
-| TC-55 | BR-1 | WordPress installs once | Launch several instances together | Exactly one installs WordPress (boot lock); all serve the same site | D |
+| TC-55 | BR-14, BR-1 | WordPress installs once | Launch several instances together | Exactly one installs WordPress (boot lock); all serve the same site | D |
+| TC-66 | BR-12 | EFS backup | Check the backup policy of the EFS file system (`aws efs describe-backup-policy`) | Status is ENABLED | D |
+| TC-69 | BR-15 | Load targets met | `./load-test.sh <env>` with 100 concurrent users (see `ab` results) | Error rate under 1%; p95 response time 2 s or less | D |
 
 ## 6. Deployment and operations
 
@@ -79,9 +81,14 @@ Date: 2026-10-10. Traces to [BUSINESS_REQUIREMENTS.md](BUSINESS_REQUIREMENTS.md)
 | TC-60 | BR-10 | Clean deploy | `./deploy.sh dev apply` on an empty account | Applies without error; `site_url` loads the WordPress installer or site | D |
 | TC-61 | BR-10 | Idempotency | Run `terraform plan` immediately after apply | No changes | D |
 | TC-62 | BR-10 | Rolling update | Change the launch template (for example `instance_type`) and apply | Instance refresh replaces instances without downtime | D |
-| TC-63 | BR-10 | Environment isolation | Compare dev, test and prod VPC CIDRs and state | Ranges 10.0, 10.1, 10.2 /16; separate states; no overlap | D |
+| TC-63 | BR-13, BR-10 | Environment isolation | Compare dev, test and prod VPC CIDRs and state | Ranges 10.0, 10.1, 10.2 /16; separate states; no overlap | D |
 | TC-64 | BR-10 | Clean destroy | `./deploy.sh dev destroy` | All resources removed; no orphaned costs | D |
 | TC-65 | BR-11 | NAT gateway off by default | Check route tables and resources in each environment | No NAT gateway or EIP | D |
+| TC-67 | BR-13 | Environment naming and tags | List resources and their `Environment` tag in dev, test and prod | Names start with `deham9-<env>`; tags match the environment | D |
+| TC-68 | BR-14 | Self-configuring instance | Terminate one web instance and wait for its replacement | The new instance mounts EFS, serves WordPress and goes healthy with no manual action | D |
+| TC-70 | BR-16 | Remote state and locking | Apply `bootstrap/`, switch an environment's `backend.tf` to S3, then start two applies at once | State bucket and lock table exist; the second apply is blocked by the lock | D |
+| TC-71 | BR-16 | State bucket protections | After applying `bootstrap/`, check the state bucket and lock table (`aws s3api get-bucket-versioning`, `get-bucket-encryption`, `get-public-access-block`; `aws dynamodb describe-table`) | Versioning enabled; KMS encryption; all public access blocked; lock table has hash key `LockID` | D |
+| TC-72 | BR-17 | Documentation and cost estimate current | Compare instance types, counts and the off-hours schedule in each `terraform.tfvars` with the cost table in `DOCUMENTATION.md`; check `README.md` and `CLAUDE.md` mention any new variable or output | Estimate matches the configuration; docs list every variable and output; reviewed on any change that adds or resizes resources | M |
 
 ## 7. Execution log
 
@@ -92,4 +99,4 @@ Date: 2026-10-10. Traces to [BUSINESS_REQUIREMENTS.md](BUSINESS_REQUIREMENTS.md)
 ## 8. Entry and exit criteria
 
 - **Entry:** code merged to the branch under test; automated tests (TC-01 to TC-08) pass; target environment deployed.
-- **Exit:** all Must-priority BRs (BR-1 to BR-6) have every linked test passed; defects open at severity high are zero; results are recorded in the execution log.
+- **Exit:** all Must-priority BRs (BR-1 to BR-6, BR-12 and BR-14) have every linked test passed; defects open at severity high are zero; results are recorded in the execution log.
