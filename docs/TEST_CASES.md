@@ -108,10 +108,12 @@ Stories are in [USER_STORIES.md](USER_STORIES.md).
 | Test case | User stories |
 | --- | --- |
 | TC-01 | US-14 |
-| TC-04 | US-21 |
+| TC-02 | US-14 |
+| TC-03 | US-14 |
+| TC-04 | US-14, US-21 |
 | TC-05 | US-14 |
-| TC-06 | US-14 |
-| TC-07 | US-14 |
+| TC-06 | US-10, US-14 |
+| TC-07 | US-15, US-14 |
 | TC-08 | US-09 |
 | TC-10 | US-02 |
 | TC-11 | US-02 |
@@ -128,7 +130,7 @@ Stories are in [USER_STORIES.md](USER_STORIES.md).
 | TC-24 | US-15 |
 | TC-25 | US-16 |
 | TC-26 | US-04, US-16 |
-| TC-27 | US-08 |
+| TC-27 | US-08, US-16 |
 | TC-28 | US-16 |
 | TC-29 | US-09 |
 | TC-30 | US-16 |
@@ -144,7 +146,7 @@ Stories are in [USER_STORIES.md](USER_STORIES.md).
 | TC-52 | US-04 |
 | TC-53 | US-06 |
 | TC-54 | US-01 |
-| TC-55 | US-08 |
+| TC-55 | US-02, US-08 |
 | TC-60 | US-07 |
 | TC-61 | US-07 |
 | TC-62 | US-11 |

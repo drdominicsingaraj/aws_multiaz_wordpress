@@ -16,6 +16,7 @@ As a visitor, I want pages to load quickly over HTTPS, so that I can read the si
 As a visitor, I want the site to stay up when one Availability Zone fails, so that I never notice an outage.
 - Web servers, database and file system run in two AZs (TC-10).
 - Losing a web server, a whole AZ's servers or the database writer does not take the site down (TC-11, TC-12, TC-13).
+- Several servers launched together serve the same single WordPress install (TC-55).
 
 **US-03: Site copes with traffic spikes** (BR-2, BR-15; Must)
 As a visitor, I want the site to stay responsive when many people arrive at once, so that busy periods do not break it.
@@ -93,6 +94,7 @@ As a security officer, I want data encrypted at rest and in transit, so that a s
 - Aurora, EFS, volumes, cache and S3 report encryption on (TC-25).
 - Unencrypted EFS and Redis connections are refused (TC-26).
 - Servers require IMDSv2 and the database is not public (TC-28, TC-30).
+- The database password is held in Secrets Manager and never printed in logs or output (TC-27).
 
 **US-17: Audit trail in prod** (BR-7; Should)
 As a security officer, I want flow logs, CloudTrail and GuardDuty in prod with configurable retention, so that I can investigate incidents.
