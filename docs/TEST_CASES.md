@@ -100,3 +100,61 @@ Date: 2026-10-10. Traces to [BUSINESS_REQUIREMENTS.md](BUSINESS_REQUIREMENTS.md)
 
 - **Entry:** code merged to the branch under test; automated tests (TC-01 to TC-08) pass; target environment deployed.
 - **Exit:** all Must-priority BRs (BR-1 to BR-6, BR-12 and BR-14) have every linked test passed; defects open at severity high are zero; results are recorded in the execution log.
+
+## 9. Traceability to user stories
+
+Stories are in [USER_STORIES.md](USER_STORIES.md).
+
+| Test case | User stories |
+| --- | --- |
+| TC-01 | US-14 |
+| TC-04 | US-21 |
+| TC-05 | US-14 |
+| TC-06 | US-14 |
+| TC-07 | US-14 |
+| TC-08 | US-09 |
+| TC-10 | US-02 |
+| TC-11 | US-02 |
+| TC-12 | US-02 |
+| TC-13 | US-02 |
+| TC-14 | US-03 |
+| TC-15 | US-03 |
+| TC-16 | US-10 |
+| TC-17 | US-20 |
+| TC-20 | US-01 |
+| TC-21 | US-15 |
+| TC-22 | US-15 |
+| TC-23 | US-15 |
+| TC-24 | US-15 |
+| TC-25 | US-16 |
+| TC-26 | US-04, US-16 |
+| TC-27 | US-08 |
+| TC-28 | US-16 |
+| TC-29 | US-09 |
+| TC-30 | US-16 |
+| TC-40 | US-18 |
+| TC-41 | US-18 |
+| TC-42 | US-18 |
+| TC-43 | US-17 |
+| TC-44 | US-17 |
+| TC-45 | US-17 |
+| TC-46 | US-18 |
+| TC-50 | US-19 |
+| TC-51 | US-19 |
+| TC-52 | US-04 |
+| TC-53 | US-06 |
+| TC-54 | US-01 |
+| TC-55 | US-08 |
+| TC-60 | US-07 |
+| TC-61 | US-07 |
+| TC-62 | US-11 |
+| TC-63 | US-12 |
+| TC-64 | US-07 |
+| TC-65 | US-20 |
+| TC-66 | US-05 |
+| TC-67 | US-12 |
+| TC-68 | US-05, US-08 |
+| TC-69 | US-01 |
+| TC-70 | US-13 |
+| TC-71 | US-13 |
+| TC-72 | US-21 |
